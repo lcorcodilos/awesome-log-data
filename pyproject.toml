@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "click>=8.4.2",
     "evtx>=0.12.1",
     "pydantic>=2.13.4",
     "pygrok>=1.0.0",
