@@ -51,21 +51,3 @@ class DatasetAdapter(Protocol):
     def discover(root: Path) -> Iterator[SourceFile]:
         "Walk a dataset's raw files and yield one SourceFile per parseable source"
         ...
-
-
-_REGISTRY: dict[DatasetId, type[DatasetAdapter]] = {}
-
-
-def register[A: type[DatasetAdapter]](adapter: A) -> A:
-    "Class decorator: registers adapter under adapter.dataset_id."
-    if adapter.dataset_id in _REGISTRY:
-        raise ValueError(f"dataset_id {adapter.dataset_id!r} is already registered")
-    _REGISTRY[adapter.dataset_id] = adapter
-    return adapter
-
-
-def get_adapter(dataset_id: DatasetId) -> type[DatasetAdapter]:
-    try:
-        return _REGISTRY[dataset_id]
-    except KeyError:
-        raise LookupError(f"no adapter registered for dataset_id {dataset_id!r}") from None

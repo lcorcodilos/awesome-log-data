@@ -13,8 +13,8 @@ from pathlib import Path
 
 import click
 
-from awesome_log_data import base
-from awesome_log_data.base import DatasetId, get_adapter
+from awesome_log_data.adapters import adapter_exists, get_adapter
+from awesome_log_data.base import DatasetId
 from awesome_log_data.manifest import ManifestEntry, ManifestStore, compute_source_id, sha256_file
 from awesome_log_data.sharded_dataset import ShardedDataset
 
@@ -95,10 +95,9 @@ def main(dataset_id: str, path: Path) -> None:
     """Ingest DATASET_ID's raw files at PATH: extract + parse + manifest + shard."""
     # Checking dataset ID here instead of click.Choice to keep it
     # live across the module's lifetime, same as the registry itself.
-    if dataset_id not in base._REGISTRY:
-        registered = ", ".join(sorted(base._REGISTRY)) or "none"
+    if not adapter_exists(dataset_id):
         raise click.BadParameter(
-            f"no adapter registered for dataset_id {dataset_id!r} (registered: {registered})",
+            f"no adapter registered for dataset_id {dataset_id!r}",
             param_hint="'dataset_id'",
         )
 
