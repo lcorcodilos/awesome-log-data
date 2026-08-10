@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
 
 ParsedRecord = dict[str, Any]
 RecordRefType = Literal["byte_offset", "event_record_id", "array_index"]
@@ -41,23 +41,30 @@ class SourceFile:
 
 @runtime_checkable
 class DatasetAdapter(Protocol):
-    dataset_id: DatasetId
+    """Adapters are never instantiated — the class itself is the singleton,
+    matched structurally against this protocol at the class level (see
+    register())."""
 
-    def discover(self, root: Path) -> Iterator[SourceFile]:
+    dataset_id: ClassVar[DatasetId]
+
+    @staticmethod
+    def discover(root: Path) -> Iterator[SourceFile]:
         "Walk a dataset's raw files and yield one SourceFile per parseable source"
         ...
 
 
-_REGISTRY: dict[DatasetId, DatasetAdapter] = {}
+_REGISTRY: dict[DatasetId, type[DatasetAdapter]] = {}
 
 
-def register(adapter: DatasetAdapter) -> None:
+def register[A: type[DatasetAdapter]](adapter: A) -> A:
+    "Class decorator: registers adapter under adapter.dataset_id."
     if adapter.dataset_id in _REGISTRY:
         raise ValueError(f"dataset_id {adapter.dataset_id!r} is already registered")
     _REGISTRY[adapter.dataset_id] = adapter
+    return adapter
 
 
-def get_adapter(dataset_id: DatasetId) -> DatasetAdapter:
+def get_adapter(dataset_id: DatasetId) -> type[DatasetAdapter]:
     try:
         return _REGISTRY[dataset_id]
     except KeyError:
