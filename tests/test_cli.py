@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from click.testing import CliRunner
 
-from awesome_log_data import base
-from awesome_log_data.base import DatasetId, SourceFile
+from awesome_log_data import adapters
+from awesome_log_data.base import DatasetAdapter, DatasetId, SourceFile
 from awesome_log_data.cli import IngestSummary, ingest_dataset, main
 from awesome_log_data.manifest import ManifestStore
 from awesome_log_data.parsers.json_lines_parser import JsonLinesParser
@@ -18,19 +18,22 @@ from awesome_log_data.sharded_dataset import ShardedDataset
 OTRF = "otrf"
 
 
-class _FakeAdapter:
-    dataset_id = OTRF
+def _fake_adapter(sources: list[SourceFile]) -> type[DatasetAdapter]:
+    "Builds a fresh adapter class per call, with sources baked in by closure."
 
-    def __init__(self, sources: list[SourceFile]) -> None:
-        self._sources = sources
+    class _FakeAdapter:
+        dataset_id: ClassVar[DatasetId] = OTRF
 
-    def discover(self, root: Path) -> Iterator[SourceFile]:
-        yield from self._sources
+        @staticmethod
+        def discover(root: Path) -> Iterator[SourceFile]:
+            yield from sources
+
+    return _FakeAdapter
 
 
 @pytest.fixture(autouse=True)
 def _clean_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(base, "_REGISTRY", {})
+    monkeypatch.setattr(adapters, "_REGISTRY", {})
 
 
 def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
@@ -53,7 +56,7 @@ def test_ingest_dataset_writes_manifest_and_shards(tmp_path: Path) -> None:
         license="MIT",
         labeled=False,
     )
-    base.register(_FakeAdapter([source]))
+    adapters.register(_fake_adapter([source]))
 
     manifest_path = tmp_path / "manifest.jsonl"
     parsed_root = tmp_path / "parsed"
@@ -93,7 +96,7 @@ def test_ingest_dataset_is_idempotent_on_rerun(tmp_path: Path) -> None:
         license="MIT",
         labeled=False,
     )
-    base.register(_FakeAdapter([source]))
+    adapters.register(_fake_adapter([source]))
 
     manifest_path = tmp_path / "manifest.jsonl"
     parsed_root = tmp_path / "parsed"
@@ -138,7 +141,7 @@ def test_ingest_dataset_interleaves_multiple_source_files(tmp_path: Path) -> Non
             labeled=False,
         ),
     ]
-    base.register(_FakeAdapter(sources))
+    adapters.register(_fake_adapter(sources))
 
     manifest_path = tmp_path / "manifest.jsonl"
     parsed_root = tmp_path / "parsed"
@@ -161,7 +164,7 @@ def test_main_parses_argv_and_invokes_ingest_dataset(
     # (not click.Choice — see cli.py), so it still has to actually be
     # registered to pass, even though ingest_dataset is mocked out below
     # and never touches this adapter's behavior.
-    base.register(_FakeAdapter([]))
+    adapters.register(_fake_adapter([]))
 
     calls: list[tuple[DatasetId, Path]] = []
 
@@ -181,7 +184,7 @@ def test_main_rejects_unknown_dataset_id(tmp_path: Path) -> None:
     # Registering a real adapter first proves this is discriminating by
     # dataset_id, not just rejecting everything because the registry is
     # empty.
-    base.register(_FakeAdapter([]))
+    adapters.register(_fake_adapter([]))
 
     result = CliRunner().invoke(main, ["not_a_real_dataset", str(tmp_path)])
 
@@ -189,7 +192,7 @@ def test_main_rejects_unknown_dataset_id(tmp_path: Path) -> None:
 
 
 def test_main_rejects_nonexistent_path() -> None:
-    base.register(_FakeAdapter([]))
+    adapters.register(_fake_adapter([]))
 
     result = CliRunner().invoke(main, [OTRF, "/no/such/path/exists"])
 
