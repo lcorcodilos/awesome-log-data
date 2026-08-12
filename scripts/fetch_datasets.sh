@@ -3,19 +3,10 @@
 #
 # Usage:
 #   scripts/fetch_datasets.sh <dataset_id>   # fetch one dataset
-#   scripts/fetch_datasets.sh all            # fetch every non-gated dataset,
-#                                             # and print instructions for
-#                                             # the gated ones
-#   scripts/fetch_datasets.sh list           # list dataset_ids and their
-#                                             # gated/direct status
+#   scripts/fetch_datasets.sh all            # fetch every dataset
+#   scripts/fetch_datasets.sh list           # list dataset_ids
 #
 # Requires: git, curl. ait_lds also requires jq (Zenodo API file listing).
-#
-# Gated datasets (LANL family) need a manual form + email-approval step —
-# this script prints where to go and what to do, then stops. cert_insider
-# (Kilthub/Figshare) isn't login-gated, but doesn't expose a predictable
-# per-file download URL from its landing page either, so it gets the same
-# print-and-stop treatment for now.
 
 set -euo pipefail
 
@@ -36,21 +27,6 @@ require_cmd() {
         echo "error: '$1' is required but not found on PATH" >&2
         exit 1
     fi
-}
-
-print_wall_instructions() {
-    local dataset_id="$1"
-    local url="$2"
-    shift 2
-    log "${dataset_id}: gated — manual access required"
-    echo ""
-    echo "  ${dataset_id} requires a manual step before it can be fetched:"
-    echo "    1. Visit ${url}"
-    for line in "$@"; do
-        echo "    ${line}"
-    done
-    echo "    Place the downloaded files under data/raw/${dataset_id}/"
-    echo ""
 }
 
 # If the repo uses git-lfs and git-lfs isn't installed,
@@ -162,58 +138,19 @@ fetch_elastic_fixtures() {
     log "elastic_fixtures: done"
 }
 
-# --- gated: LANL family -------------------------------------------------
-
-fetch_lanl_uhnd() {
-    print_wall_instructions lanl_uhnd "https://csr.lanl.gov/data/2017/" \
-        "2. Submit your email + use case in the access request form —" \
-        "   download links are granted immediately, no approval wait." \
-        "3. Recommended to only download 7-8 CONSECUTIVE days of wls (host) .gz files —" \
-        "   not all ~60. Each is ~400MB compressed -> ~12GB uncompressed," \
-        "   so the full set is impractically large for what's needed" \
-        "   here. " \
-        "   Skip netflow entirely — huge, and not expected to add much" \
-        "   over LANL Comprehensive's flows.txt.gz."
-}
-
-fetch_lanl_comprehensive() {
-    print_wall_instructions lanl_comprehensive "https://csr.lanl.gov/data/cyber1/" \
-        "2. Submit your email + use case in the access request form —" \
-        "   download links are granted immediately, no approval wait." \
-        "3. Download auth.txt.gz, proc.txt.gz, flows.txt.gz, dns.txt.gz," \
-        "   redteam.txt.gz."
-}
-
-# --- gated (soft): cert_insider ------------------------------------------
-
-fetch_cert_insider() {
-    print_wall_instructions cert_insider \
-        "https://kilthub.cmu.edu/articles/dataset/Insider_Threat_Test_Dataset/12841247" \
-        "2. Select release r6.2 in the version dropdown (or the latest release)." \
-        "3. Download the files from that release (no login required, but" \
-        "   there's no stable direct-download URL to script against)."
-}
-
 # --- dispatch -------------------------------------------------------------
 
-DIRECT_DATASETS=(otrf evtx_attack_samples flaws_cloud ait_lds elastic_fixtures)
-GATED_DATASETS=(lanl_uhnd lanl_comprehensive cert_insider)
-ALL_DATASETS=("${DIRECT_DATASETS[@]}" "${GATED_DATASETS[@]}")
+ALL_DATASETS=(otrf evtx_attack_samples flaws_cloud ait_lds elastic_fixtures)
 
 usage() {
     echo "Usage: $0 <dataset_id|all|list>"
     echo ""
-    echo "Direct (fetchable now):"
-    printf '  %s\n' "${DIRECT_DATASETS[@]}"
-    echo "Gated (prints manual-access instructions):"
-    printf '  %s\n' "${GATED_DATASETS[@]}"
+    echo "Datasets:"
+    printf '  %s\n' "${ALL_DATASETS[@]}"
 }
 
 list_datasets() {
-    echo "direct:"
-    printf '  %s\n' "${DIRECT_DATASETS[@]}"
-    echo "gated:"
-    printf '  %s\n' "${GATED_DATASETS[@]}"
+    printf '%s\n' "${ALL_DATASETS[@]}"
 }
 
 main() {
@@ -231,8 +168,7 @@ main() {
                 "fetch_${dataset_id}"
             done
             ;;
-        otrf|evtx_attack_samples|flaws_cloud|ait_lds|elastic_fixtures|\
-        lanl_uhnd|lanl_comprehensive|cert_insider)
+        otrf|evtx_attack_samples|flaws_cloud|ait_lds|elastic_fixtures)
             "fetch_$1"
             ;;
         -h|--help)
