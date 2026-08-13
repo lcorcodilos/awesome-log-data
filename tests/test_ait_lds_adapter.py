@@ -59,28 +59,59 @@ def test_discover_includes_only_the_four_structured_formats(tmp_path: Path) -> N
 
 
 def test_discover_assigns_correct_parser_per_format(tmp_path: Path) -> None:
+    # discover() deletes each scenario's extracted directory as soon as it
+    # finishes yielding that scenario's files (see cleanup test below), so
+    # every source here must be parsed immediately upon receipt — not
+    # collected into a dict and parsed afterward, which would hit deleted
+    # files. This mirrors how cli.ingest_dataset consumes discover().
     _make_zip(tmp_path / "fox_no-pcaps.zip", _MEMBERS)
 
-    by_name = {s.file_name: s for s in AitLdsAdapter.discover(tmp_path)}
+    parsed_by_name = {}
+    for source in AitLdsAdapter.discover(tmp_path):
+        parsed_by_name[source.file_name] = (source.parser, list(source.parser.parse(source.path)))
 
-    apache = by_name["fox_no-pcaps/gather/webserver/logs/apache2/access.log"]
-    assert isinstance(apache.parser, GrokParser)
-    assert list(apache.parser.parse(apache.path))[0][1]["clientip"] == "172.17.130.196"
+    apache_parser, apache_records = parsed_by_name[
+        "fox_no-pcaps/gather/webserver/logs/apache2/access.log"
+    ]
+    assert isinstance(apache_parser, GrokParser)
+    assert apache_records[0][1]["clientip"] == "172.17.130.196"
 
-    horde = by_name["fox_no-pcaps/gather/webserver/logs/horde/horde-access.log"]
-    assert isinstance(horde.parser, GrokParser)
+    horde_parser, _ = parsed_by_name["fox_no-pcaps/gather/webserver/logs/horde/horde-access.log"]
+    assert isinstance(horde_parser, GrokParser)
 
-    audit = by_name["fox_no-pcaps/gather/webserver/logs/audit/audit.log"]
-    assert isinstance(audit.parser, AuditdParser)
-    assert list(audit.parser.parse(audit.path))[0][1]["type"] == "LOGIN"
+    audit_parser, audit_records = parsed_by_name[
+        "fox_no-pcaps/gather/webserver/logs/audit/audit.log"
+    ]
+    assert isinstance(audit_parser, AuditdParser)
+    assert audit_records[0][1]["type"] == "LOGIN"
 
-    suricata = by_name["fox_no-pcaps/gather/webserver/logs/suricata/eve.json"]
-    assert isinstance(suricata.parser, JsonLinesParser)
+    suricata_parser, _ = parsed_by_name["fox_no-pcaps/gather/webserver/logs/suricata/eve.json"]
+    assert isinstance(suricata_parser, JsonLinesParser)
 
-    metric = by_name[
+    metric_parser, _ = parsed_by_name[
         "fox_no-pcaps/gather/monitoring/logs/logstash/internal-share/2022-01-14-system.cpu.log"
     ]
-    assert isinstance(metric.parser, JsonLinesParser)
+    assert isinstance(metric_parser, JsonLinesParser)
+
+
+def test_discover_deletes_extracted_dir_after_each_scenario_zip(tmp_path: Path) -> None:
+    _make_zip(tmp_path / "fox_no-pcaps.zip", _MEMBERS)
+    _make_zip(tmp_path / "harrison_no-pcaps.zip", _MEMBERS)
+
+    seen_extracted_dirs_during_fox = False
+    for source in AitLdsAdapter.discover(tmp_path):
+        if source.file_name.startswith("fox_no-pcaps/"):
+            assert (tmp_path / "fox_no-pcaps").exists()
+            seen_extracted_dirs_during_fox = True
+        elif source.file_name.startswith("harrison_no-pcaps/"):
+            # fox's extraction must be gone by the time we've moved on to
+            # harrison's files.
+            assert not (tmp_path / "fox_no-pcaps").exists()
+
+    assert seen_extracted_dirs_during_fox
+    # The last scenario's extraction is cleaned up once the generator
+    # itself finishes running (e.g. when a caller drains it via list()).
+    assert not (tmp_path / "harrison_no-pcaps").exists()
 
 
 def test_discover_marks_sources_unlabeled(tmp_path: Path) -> None:

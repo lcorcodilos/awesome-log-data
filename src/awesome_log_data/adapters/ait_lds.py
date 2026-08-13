@@ -24,10 +24,26 @@ own service log (monitoring/logs/logstash/*.log with no per-host
 subdirectory), redis-server.log, journal/*.journal, and the labels/,
 processing/, rules/, environment/ directories (tooling/ground-truth, not
 logs) — all either free-text-dominated or not logs at all.
+
+Each scenario zip extracts to tens/hundreds of MB uncompressed; unlike
+every other adapter's extraction (persistent, left on disk so
+RecordParser.resolve() keeps working after discover() returns), this
+adapter deletes a scenario's extracted directory as soon as it has
+finished yielding that scenario's SourceFiles, before extracting the
+next zip — otherwise a full multi-scenario checkout would need all
+scenarios extracted simultaneously on disk at once. The tradeoff: a
+SourceFile's path is only guaranteed to exist while discover() is
+paused at that file's yield — i.e. a caller must parse/hash/stat it
+before asking the generator for the next one (exactly what
+cli.ingest_dataset does). Fully draining discover() into a list first
+and only then touching source.path, or calling resolve() after
+discover() has finished, will hit missing files for every scenario but
+the last.
 """
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 from typing import ClassVar
@@ -78,16 +94,19 @@ class AitLdsAdapter:
         for zip_path in sorted(root.rglob("*.zip")):
             extracted_dir = zip_path.with_suffix("")
             extracted_files = extract_zip(zip_path, extracted_dir)
-            for file_path in sorted(extracted_files):
-                rel_parts = file_path.relative_to(extracted_dir).parts
-                parser = _classify(rel_parts, apache_parser, audit_parser, json_parser)
-                if parser is None:
-                    continue
-                yield SourceFile(
-                    file_name=file_path.relative_to(root).as_posix(),
-                    path=file_path,
-                    parser=parser,
-                    source_url=AitLdsAdapter.source_url,
-                    license=AitLdsAdapter.license,
-                    labeled=False,
-                )
+            try:
+                for file_path in sorted(extracted_files):
+                    rel_parts = file_path.relative_to(extracted_dir).parts
+                    parser = _classify(rel_parts, apache_parser, audit_parser, json_parser)
+                    if parser is None:
+                        continue
+                    yield SourceFile(
+                        file_name=file_path.relative_to(root).as_posix(),
+                        path=file_path,
+                        parser=parser,
+                        source_url=AitLdsAdapter.source_url,
+                        license=AitLdsAdapter.license,
+                        labeled=False,
+                    )
+            finally:
+                shutil.rmtree(extracted_dir)
