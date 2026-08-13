@@ -25,6 +25,18 @@ def test_parse_yields_all_records_in_order(tmp_path: Path) -> None:
     assert parser.record_ref_type == "byte_offset"
 
 
+def test_parse_skips_blank_lines(tmp_path: Path) -> None:
+    # A trailing blank line (two trailing newlines) is common in real
+    # files and must not be treated as a record to parse.
+    path = tmp_path / "with_blank.jsonl"
+    path.write_text('{"a": 1}\n\n{"a": 2}\n\n', encoding="utf-8")
+
+    parser = JsonLinesParser()
+    results = list(parser.parse(path))
+
+    assert [parsed for _, parsed in results] == [{"a": 1}, {"a": 2}]
+
+
 def test_resolve_returns_record_at_ref(tmp_path: Path) -> None:
     records = [{"a": 1}, {"a": 2}, {"a": 3}]
     path = tmp_path / "sample.jsonl"
