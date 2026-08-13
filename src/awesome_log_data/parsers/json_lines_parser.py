@@ -16,8 +16,9 @@ class JsonLinesParser:
         with open(path, "rb") as f:
             offset = f.tell()
             for raw in f:
-                record: ParsedRecord = json.loads(raw)
-                yield offset, record
+                if raw.strip():
+                    record: ParsedRecord = json.loads(raw)
+                    yield offset, record
                 offset = f.tell()
 
     def resolve(self, path: Path, ref: int) -> ParsedRecord:
