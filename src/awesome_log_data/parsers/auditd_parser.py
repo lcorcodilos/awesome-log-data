@@ -24,6 +24,20 @@ _PREFIX_RE = re.compile(
 _KV_RE = re.compile(r"""(?P<key>[\w.-]+)=(?P<value>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+)""")
 
 
+def looks_like_auditd(path: Path) -> bool:
+    """True if the first non-blank line matches the auditd prefix pattern.
+    Used to content-probe files whose extension alone doesn't indicate
+    their format (e.g. OTRF ships raw auditd logs under a plain .log
+    name, indistinguishable by extension from other .log formats).
+    """
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped:
+                return _PREFIX_RE.match(stripped) is not None
+    return False
+
+
 class AuditdParser:
     record_ref_type: RecordRefType = "byte_offset"
 

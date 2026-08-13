@@ -43,34 +43,10 @@ from typing import ClassVar
 from awesome_log_data.adapters import register
 from awesome_log_data.base import DatasetId, SourceFile
 from awesome_log_data.parsers.elastic_events_parser import ElasticEventsParser, normalize_event
-from awesome_log_data.parsers.json_lines_parser import JsonLinesParser
+from awesome_log_data.parsers.json_lines_parser import JsonLinesParser, is_json_lines
 
 _LOG_GLOB = "packages/*/data_stream/*/_dev/test/pipeline/test-*.log"
 _JSON_GLOB = "packages/*/data_stream/*/_dev/test/pipeline/test-*.json"
-
-
-def _is_json_lines(path: Path) -> bool:
-    """True if every non-blank line in path is valid standalone JSON.
-
-    Checking every line (not just the first) matters: some fixture files
-    mix bare JSON lines with syslog-prefixed JSON (a hybrid format, not
-    real NDJSON — confirmed in cyberarkpas), and some end with a
-    deliberately malformed line used to test the real ingest pipeline's
-    error handling (confirmed in azure_frontdoor) — neither is safe to
-    treat as uniformly parseable.
-    """
-    saw_any_line = False
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            saw_any_line = True
-            try:
-                json.loads(stripped)
-            except json.JSONDecodeError:
-                return False
-    return saw_any_line
 
 
 def _has_any_normalizable_event(path: Path) -> bool:
@@ -94,7 +70,7 @@ class ElasticFixturesAdapter:
     def discover(root: Path) -> Iterator[SourceFile]:
         lines_parser = JsonLinesParser()
         for log_path in sorted(root.glob(_LOG_GLOB)):
-            if not _is_json_lines(log_path):
+            if not is_json_lines(log_path):
                 continue
             yield SourceFile(
                 file_name=log_path.relative_to(root).as_posix(),
