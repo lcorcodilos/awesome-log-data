@@ -138,9 +138,64 @@ fetch_elastic_fixtures() {
     log "elastic_fixtures: done"
 }
 
+# --- splunk_attack_data ----------------------------------------------------
+
+# Unlike every other fetch_* function, this one actively pulls LFS content
+# rather than treating LFS as an error (check_no_lfs isn't called here) -
+# every raw sample in this repo is stored via LFS. The full repo is ~23GB,
+# so instead of a full `git lfs pull`, the LFS fetch is scoped to files
+# whose extension could plausibly be a format awesome_log_data.adapters.
+# splunk_attack_data actually supports (json/ndjson/log/xml), computed by
+# walking the (small, non-LFS) manifest YAML files already on disk after
+# the initial clone. This is over-inclusive by design - the adapter's own
+# discover() remains the real authority once real bytes are present, and
+# will silently skip anything that turns out unsupported.
+fetch_splunk_attack_data() {
+    require_cmd git
+    require_cmd git-lfs
+    local out_dir="${RAW_DIR}/splunk_attack_data"
+    local repo_url="https://github.com/splunk/attack_data.git"
+
+    if [ -d "${out_dir}/.git" ]; then
+        log "splunk_attack_data: already cloned at ${out_dir}, pulling latest manifests"
+        git -C "$out_dir" pull --ff-only
+    else
+        mkdir -p "$out_dir"
+        log "splunk_attack_data: cloning attack_data (LFS smudge skipped for the initial clone)"
+        GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 "$repo_url" "$out_dir"
+    fi
+
+    log "splunk_attack_data: computing scoped LFS pull list from manifests"
+    local paths_file
+    paths_file="$(mktemp)"
+    (cd "$REPO_ROOT" && uv run python -c '
+import sys
+from pathlib import Path
+from awesome_log_data.adapters.splunk_attack_data import iter_lfs_candidate_paths
+for p in iter_lfs_candidate_paths(Path(sys.argv[1])):
+    print(p)
+' "$out_dir") > "$paths_file"
+
+    local total
+    total="$(wc -l < "$paths_file" | tr -d ' ')"
+    log "splunk_attack_data: pulling LFS content for ${total} candidate files (batched)"
+
+    # git lfs pull --include can choke on a very long argument list, so pull
+    # in batches rather than one call covering every candidate path.
+    local batch_prefix="${paths_file}.batch."
+    split -l 300 "$paths_file" "$batch_prefix"
+    for batch in "${batch_prefix}"*; do
+        [ -s "$batch" ] || continue
+        git -C "$out_dir" lfs pull --include="$(paste -sd, "$batch")"
+    done
+    rm -f "$paths_file" "${batch_prefix}"*
+
+    log "splunk_attack_data: done"
+}
+
 # --- dispatch -------------------------------------------------------------
 
-ALL_DATASETS=(otrf evtx_attack_samples flaws_cloud ait_lds elastic_fixtures)
+ALL_DATASETS=(otrf evtx_attack_samples flaws_cloud ait_lds elastic_fixtures splunk_attack_data)
 
 usage() {
     echo "Usage: $0 <dataset_id|all|list>"
@@ -168,7 +223,7 @@ main() {
                 "fetch_${dataset_id}"
             done
             ;;
-        otrf|evtx_attack_samples|flaws_cloud|ait_lds|elastic_fixtures)
+        otrf|evtx_attack_samples|flaws_cloud|ait_lds|elastic_fixtures|splunk_attack_data)
             "fetch_$1"
             ;;
         -h|--help)

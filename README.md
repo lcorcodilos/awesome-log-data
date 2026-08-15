@@ -21,6 +21,7 @@ calling code's perspective.
 | `flaws_cloud` | [flaws.cloud](https://summitroute.com/downloads/flaws_cloudtrail_logs.tar) — real AWS CloudTrail logs from a public cloud-security CTF | unspecified | yes |
 | `ait_lds` | [AIT Log Data Set v2](https://zenodo.org/records/19483937) — Apache access logs, Linux auditd logs, Suricata NIDS events, and Metricbeat/ECS JSON from simulated multi-host attack scenarios | CC-BY-NC-SA-4.0 | no |
 | `elastic_fixtures` | [elastic/integrations](https://github.com/elastic/integrations) test fixtures — real-world sample logs for hundreds of vendor products (AWS, Okta, Auth0, Microsoft 365, CrowdStrike, and more), used by Elastic to test their own ingest pipelines | Elastic-2.0 | no |
+| `splunk_attack_data` | [Splunk attack_data](https://github.com/splunk/attack_data) — Windows Event XML, Linux auditd, and cloud/SaaS JSON logs generated per MITRE ATT&CK technique | Apache-2.0 | yes |
 
 "Labeled" means each record can be tied back to the specific attack
 technique that produced it (per the manifest's `labeled` field) — useful if
@@ -51,7 +52,11 @@ scripts/fetch_datasets.sh all                # fetch every dataset
 
 This downloads each dataset's raw files into `data/raw/<dataset_id>/`
 (gitignored — raw data isn't checked into the repo). Requires `git` and
-`curl`; `ait_lds` additionally requires `jq`.
+`curl`; `ait_lds` additionally requires `jq`, and `splunk_attack_data`
+additionally requires [`git-lfs`](https://git-lfs.com) (its raw samples are
+stored via LFS; the fetch script pulls a scoped subset of the ~23GB upstream
+repo rather than the whole thing — only files whose extension could plausibly
+be a format the adapter supports).
 
 ## Ingesting a dataset
 
