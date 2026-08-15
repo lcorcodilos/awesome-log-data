@@ -8,6 +8,14 @@ containing a nested `msg='key=value ...'` blob for PAM-related types). The
 prefix is parsed into named fields (type/epoch/audit_id) separately from
 the tail so that the prefix's own "msg=audit(...)" doesn't collide with a
 key literally named "msg" that may appear again in the tail.
+
+The timestamp inside audit(...) is captured as a greedy, otherwise-unvalidated
+group rather than a strict `\\d+\\.\\d+` pattern: real auditd writes raw
+epoch.microseconds (`audit(1722867796.638:2746)`), but Splunk's attack_data
+dataset re-exports the same logs with a human-readable timestamp and an extra
+space before the colon (`audit(04/16/2025 08:19:50.366:45090) :`) - both are
+genuinely "auditd" content, just different export tooling, confirmed against
+real samples of each.
 """
 
 from __future__ import annotations
@@ -19,7 +27,7 @@ from pathlib import Path
 from awesome_log_data.base import ParsedRecord, RecordRefType
 
 _PREFIX_RE = re.compile(
-    r"^type=(?P<type>\S+) msg=audit\((?P<epoch>\d+\.\d+):(?P<audit_id>\d+)\):\s*(?P<tail>.*)$"
+    r"^type=(?P<type>\S+) msg=audit\((?P<epoch>.+):(?P<audit_id>\d+)\)\s*:\s*(?P<tail>.*)$"
 )
 _KV_RE = re.compile(r"""(?P<key>[\w.-]+)=(?P<value>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+)""")
 
