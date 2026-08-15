@@ -37,9 +37,7 @@ class ShardedDataset:
         self._file: BinaryIO | None = None
         if self._index:
             self._shard_id = self._index[-1].shard_id
-            self._count_in_shard = sum(
-                1 for e in self._index if e.shard_id == self._shard_id
-            )
+            self._count_in_shard = sum(1 for e in self._index if e.shard_id == self._shard_id)
         else:
             self._shard_id = -1
             self._count_in_shard = 0
@@ -122,3 +120,7 @@ class ShardedDataset:
 
     def indices_for_source(self, source_id: str) -> list[int]:
         return [i for i, entry in enumerate(self._index) if entry.source_id == source_id]
+
+    @property
+    def index(self) -> list[ShardIndexEntry]:
+        return self._index
