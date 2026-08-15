@@ -95,3 +95,24 @@ def test_parse_skips_blank_lines(tmp_path: Path) -> None:
     results = list(parser.parse(path))
 
     assert len(results) == 2
+
+
+def test_parse_accepts_human_readable_timestamp_variant(tmp_path: Path) -> None:
+    # Splunk's attack_data repo ships auditd logs re-exported with a
+    # MM/DD/YYYY HH:MM:SS.mmm timestamp (with an extra space before the
+    # colon) instead of the raw epoch.microseconds form auditd itself
+    # writes - confirmed against real samples in that dataset.
+    line = (
+        "type=SYSCALL msg=audit(04/16/2025 08:19:50.366:45090) : "
+        "arch=x86_64 syscall=openat success=yes\n"
+    )
+    path = tmp_path / "splunk_style.log"
+    path.write_text(line, encoding="utf-8")
+
+    parser = AuditdParser()
+    _ref, record = next(iter(parser.parse(path)))
+
+    assert record["type"] == "SYSCALL"
+    assert record["epoch"] == "04/16/2025 08:19:50.366"
+    assert record["audit_id"] == "45090"
+    assert record["arch"] == "x86_64"
