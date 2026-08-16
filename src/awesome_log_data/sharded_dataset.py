@@ -12,9 +12,11 @@ debugging; ShardedDataset is for bulk, indexed iteration over the already-
 from __future__ import annotations
 
 import json
+from functools import cached_property
 from pathlib import Path
 from typing import Any, BinaryIO
 
+import polars as pl
 from pydantic import BaseModel
 
 from awesome_log_data.base import ParsedRecord
@@ -124,3 +126,7 @@ class ShardedDataset:
     @property
     def index(self) -> list[ShardIndexEntry]:
         return self._index
+
+    @cached_property
+    def index_df(self) -> pl.DataFrame:
+        return pl.DataFrame(self._index)
