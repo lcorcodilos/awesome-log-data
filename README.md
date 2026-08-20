@@ -88,13 +88,19 @@ parsed and appended.
 
 ## Record format
 
-Every parsed record is wrapped the same way, one JSON object per line:
+Each shard file holds the bare parsed record on every line, in that
+dataset's native field structure — not remapped to a common schema, and not
+wrapped in any envelope, so the shard files can be read directly as the
+training corpus:
 
 ```json
-{"metadata": "otrf/ec2_proxy_s3_exfiltration/ec2_proxy_s3_exfiltration_2020-09-14011940.json", "record_ref": 1048, "parsed": {"eventName": "GetObject", "...": "..."}}
+{"eventName": "GetObject", "...": "..."}
 ```
 
-- **`metadata`** — the `source_id` of the raw file this record came from
+Provenance for each record lives alongside it in `shard_index.jsonl`, not in
+the record itself (see [Reading parsed data](#reading-parsed-data)):
+
+- **`source_id`** — the `source_id` of the raw file this record came from
   (`<dataset_id>/<file_name>`, or `<dataset_id>/<file_name>#<hash>` if two
   different files happened to share a `file_name` — see the manifest's
   collision handling). Look this up in `data/manifest.jsonl` for the file's
@@ -103,8 +109,6 @@ Every parsed record is wrapped the same way, one JSON object per line:
   offset, array index, or Windows event record ID depending on the format)
   that can re-derive this exact record from source, independent of the
   parsed/sharded copy.
-- **`parsed`** — the record itself, in that dataset's native field
-  structure — not remapped to a common schema.
 
 ## Manifest
 
@@ -138,37 +142,36 @@ from awesome_log_data.sharded_dataset import ShardedDataset
 dataset = ShardedDataset(Path("data/parsed/otrf"))
 
 len(dataset)             # total record count
-dataset[0]                # {"metadata": ..., "record_ref": ..., "parsed": {...}}
+dataset[0]                # {"eventName": "GetObject", "...": "..."} - the bare parsed record
 dataset.indices_for_source("otrf/ec2_proxy_s3_exfiltration/...json")  # all record indices from one raw file
 ```
 
-Cross-reference a record's `metadata` (its `source_id`) against
-`data/manifest.jsonl` to get that file's source URL, license, or other
-provenance:
+Each record's provenance is a separate `ShardIndexEntry` at the same index in
+`dataset.index` — `source_id` (cross-reference against `data/manifest.jsonl`)
+and `record_ref` (to re-derive the record from its original raw file):
 
 ```python
 from awesome_log_data.manifest import ManifestStore
 
 manifest = ManifestStore(Path("data/manifest.jsonl"))
-entry = manifest.get(dataset[0]["metadata"])
+entry = manifest.get(dataset.index[0].source_id)
 entry.source_url, entry.license, entry.labeled
 ```
 
 To re-derive a record directly from its original raw file instead of the
 parsed copy (e.g. to see the exact original bytes, not just the parsed
 fields), use the registered adapter's parser together with the manifest
-entry's `record_ref_type` and the record's `record_ref`:
+entry's `record_ref_type` and `dataset.index[0].record_ref`:
 
 ```python
 from awesome_log_data.adapters import get_adapter
 
-record = dataset[0]
 adapter = get_adapter(entry.dataset_id)
 source = next(
     s for s in adapter.discover(Path("data/raw/otrf"))
     if s.file_name == entry.file_name
 )
-source.parser.resolve(source.path, record["record_ref"])
+source.parser.resolve(source.path, dataset.index[0].record_ref)
 ```
 
 This requires the original raw files (`data/raw/<dataset_id>/`) still

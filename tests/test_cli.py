@@ -78,8 +78,8 @@ def test_ingest_dataset_writes_manifest_and_shards(tmp_path: Path) -> None:
 
     dataset = ShardedDataset(parsed_root / "otrf")
     assert len(dataset) == 2
-    assert dataset[0]["parsed"] == {"eventName": "A"}
-    assert dataset[1]["parsed"] == {"eventName": "B"}
+    assert dataset[0] == {"eventName": "A"}
+    assert dataset[1] == {"eventName": "B"}
 
 
 def test_ingest_dataset_is_idempotent_on_rerun(tmp_path: Path) -> None:
@@ -154,7 +154,7 @@ def test_ingest_dataset_interleaves_multiple_source_files(tmp_path: Path) -> Non
 
     dataset = ShardedDataset(parsed_root / "otrf")
     assert len(dataset) == 2
-    assert {dataset[i]["metadata"] for i in range(2)} == {"otrf/a.jsonl", "otrf/b.jsonl"}
+    assert {entry.source_id for entry in dataset.index} == {"otrf/a.jsonl", "otrf/b.jsonl"}
 
 
 def test_main_parses_argv_and_invokes_ingest_dataset(

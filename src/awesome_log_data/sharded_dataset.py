@@ -1,7 +1,12 @@
 """Shards parsed records as JSONL across fixed-size files within a directory,
 maintaining a flat JSONL index (global row -> shard file + byte offset +
-source_id) for random access into a large parsed corpus without loading it
-into memory. Write with append(), read with len()/[]/indices_for_source().
+source_id + record_ref) for random access into a large parsed corpus without
+loading it into memory. Write with append(), read with len()/[]/indices_for_source().
+
+Shard files hold the bare parsed record on each line - no source_id/record_ref
+wrapper - since they're meant to be read directly as the training corpus.
+Provenance (which source file, and the ref to re-derive the record from it)
+lives only in the index, one ShardIndexEntry per record.
 
 This complements, not replaces, RecordParser.resolve() (base.py): resolve()
 re-derives one record from its original *raw* source file for point-in-time
@@ -14,7 +19,7 @@ from __future__ import annotations
 import json
 from functools import cached_property
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import BinaryIO
 
 import polars as pl
 from pydantic import BaseModel
@@ -29,6 +34,7 @@ class ShardIndexEntry(BaseModel):
     shard_id: int
     offset: int
     source_id: str
+    record_ref: int | str
 
 
 class ShardedDataset:
@@ -73,14 +79,14 @@ class ShardedDataset:
             self._file = open(self._shard_path(self._shard_id), "ab")
 
         offset = self._file.tell()
-        wrapped: dict[str, Any] = {
-            "metadata": source_id,
-            "record_ref": record_ref,
-            "parsed": parsed,
-        }
-        self._file.write(json.dumps(wrapped).encode("utf-8") + b"\n")
+        self._file.write(json.dumps(parsed).encode("utf-8") + b"\n")
         self._index.append(
-            ShardIndexEntry(shard_id=self._shard_id, offset=offset, source_id=source_id)
+            ShardIndexEntry(
+                shard_id=self._shard_id,
+                offset=offset,
+                source_id=source_id,
+                record_ref=record_ref,
+            )
         )
         self._count_in_shard += 1
 
@@ -113,11 +119,11 @@ class ShardedDataset:
     def __len__(self) -> int:
         return len(self._index)
 
-    def __getitem__(self, i: int) -> dict[str, Any]:
+    def __getitem__(self, i: int) -> ParsedRecord:
         entry = self._index[i]
         with open(self._shard_path(entry.shard_id), "rb") as f:
             f.seek(entry.offset)
-            record: dict[str, Any] = json.loads(f.readline())
+            record: ParsedRecord = json.loads(f.readline())
             return record
 
     def indices_for_source(self, source_id: str) -> list[int]:
