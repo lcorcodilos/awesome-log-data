@@ -154,7 +154,10 @@ def test_ingest_dataset_interleaves_multiple_source_files(tmp_path: Path) -> Non
 
     dataset = ShardedDataset(parsed_root / "otrf")
     assert len(dataset) == 2
-    assert {entry.source_id for entry in dataset.index} == {"otrf/a.jsonl", "otrf/b.jsonl"}
+    assert {dataset.source_ids[entry.source_id] for entry in dataset.index} == {
+        "otrf/a.jsonl",
+        "otrf/b.jsonl",
+    }
 
 
 def test_main_parses_argv_and_invokes_ingest_dataset(

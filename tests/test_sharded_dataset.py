@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import polars as pl
+
 from awesome_log_data.sharded_dataset import ShardedDataset
 
 
@@ -39,21 +41,23 @@ def test_close_writes_index_file_with_one_entry_per_record(tmp_path: Path) -> No
         ds.append("otrf/a.json", i, {"i": i})
     ds.close()
 
-    index_path = tmp_path / "shard_index.jsonl"
-    entries = [json.loads(line) for line in index_path.read_text(encoding="utf-8").splitlines()]
+    df = pl.read_parquet(tmp_path / "shard_index.parquet")
 
-    assert len(entries) == 3
-    assert entries[0]["shard_id"] == 0
-    assert entries[2]["shard_id"] == 1
-    assert all(e["source_id"] == "otrf/a.json" for e in entries)
-    assert [e["record_ref"] for e in entries] == [0, 1, 2]
+    assert len(df) == 3
+    assert df["shard_id"].to_list() == [0, 0, 1]
+    assert all(v == 0 for v in df["source_id"].to_list())
+    assert df["record_ref"].to_list() == [0, 1, 2]
+
+    source_ids_path = tmp_path / "source_ids.jsonl"
+    lines = source_ids_path.read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line) for line in lines] == ["otrf/a.json"]
 
 
 def test_context_manager_closes_and_flushes_index(tmp_path: Path) -> None:
     with ShardedDataset(tmp_path, shard_size=10) as ds:
         ds.append("otrf/a.json", 0, {"i": 0})
 
-    assert (tmp_path / "shard_index.jsonl").exists()
+    assert (tmp_path / "shard_index.parquet").exists()
 
 
 def test_getitem_returns_correct_record_by_global_index(tmp_path: Path) -> None:
@@ -67,7 +71,7 @@ def test_getitem_returns_correct_record_by_global_index(tmp_path: Path) -> None:
     for i in range(5):
         record = reader[i]
         assert record == {"i": i}
-        assert reader.index[i].source_id == "otrf/a.json"
+        assert reader.source_ids[reader.index[i].source_id] == "otrf/a.json"
         assert reader.index[i].record_ref == i
 
 
@@ -125,3 +129,46 @@ def test_resume_when_last_shard_was_filled_to_exact_boundary(tmp_path: Path) -> 
     reader = ShardedDataset(tmp_path, shard_size=2)
     assert len(reader) == 3
     assert [reader[i]["i"] for i in range(3)] == [0, 1, 2]
+
+
+def test_repeated_source_id_reuses_the_same_interned_int(tmp_path: Path) -> None:
+    with ShardedDataset(tmp_path, shard_size=10) as ds:
+        ds.append("otrf/a.json", 0, {"i": 0})
+        ds.append("otrf/a.json", 1, {"i": 1})
+        ds.append("otrf/a.json", 2, {"i": 2})
+
+    reader = ShardedDataset(tmp_path, shard_size=10)
+    assert reader.source_ids == ["otrf/a.json"]
+    assert [entry.source_id for entry in reader.index] == [0, 0, 0]
+
+
+def test_distinct_source_ids_get_sequential_ids_in_first_seen_order(tmp_path: Path) -> None:
+    with ShardedDataset(tmp_path, shard_size=10) as ds:
+        ds.append("otrf/b.json", 0, {"i": 0})
+        ds.append("otrf/a.json", 0, {"i": 1})
+        ds.append("otrf/b.json", 1, {"i": 2})
+
+    reader = ShardedDataset(tmp_path, shard_size=10)
+    assert reader.source_ids == ["otrf/b.json", "otrf/a.json"]
+    assert [entry.source_id for entry in reader.index] == [0, 1, 0]
+
+
+def test_resuming_appends_new_source_ids_after_existing_ones(tmp_path: Path) -> None:
+    with ShardedDataset(tmp_path, shard_size=10) as ds:
+        ds.append("otrf/a.json", 0, {"i": 0})
+
+    with ShardedDataset(tmp_path, shard_size=10) as ds:
+        ds.append("otrf/b.json", 0, {"i": 1})
+        ds.append("otrf/a.json", 1, {"i": 2})
+
+    reader = ShardedDataset(tmp_path, shard_size=10)
+    assert reader.source_ids == ["otrf/a.json", "otrf/b.json"]
+    assert [entry.source_id for entry in reader.index] == [0, 1, 0]
+
+
+def test_indices_for_source_returns_empty_for_unknown_source_id(tmp_path: Path) -> None:
+    with ShardedDataset(tmp_path, shard_size=10) as ds:
+        ds.append("otrf/a.json", 0, {"i": 0})
+
+    reader = ShardedDataset(tmp_path, shard_size=10)
+    assert reader.indices_for_source("otrf/never-appended.json") == []

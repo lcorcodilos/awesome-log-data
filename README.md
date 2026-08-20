@@ -79,8 +79,9 @@ recognized log file, and writes:
 - **`data/manifest.jsonl`** — one entry per ingested source file (see
   [Manifest](#manifest)).
 - **`data/parsed/<dataset_id>/`** — the parsed records themselves, sharded
-  across fixed-size JSONL files with a `shard_index.jsonl` for random access
-  (see [Reading parsed data](#reading-parsed-data)).
+  across fixed-size JSONL files with a `shard_index.parquet` (plus a small
+  `source_ids.jsonl` sidecar) for random access (see
+  [Reading parsed data](#reading-parsed-data)).
 
 Re-running the same command is safe and incremental: files already recorded
 in the manifest (by checksum) are skipped, so only newly added raw files get
@@ -97,14 +98,18 @@ training corpus:
 {"eventName": "GetObject", "...": "..."}
 ```
 
-Provenance for each record lives alongside it in `shard_index.jsonl`, not in
+Provenance for each record lives alongside it in `shard_index.parquet`, not in
 the record itself (see [Reading parsed data](#reading-parsed-data)):
 
-- **`source_id`** — the `source_id` of the raw file this record came from
-  (`<dataset_id>/<file_name>`, or `<dataset_id>/<file_name>#<hash>` if two
-  different files happened to share a `file_name` — see the manifest's
-  collision handling). Look this up in `data/manifest.jsonl` for the file's
-  source URL, license, checksum, etc.
+- **`source_id`** — an int identifying the raw file this record came from.
+  It's an index into `source_ids.jsonl` (one JSON string per line, line
+  number = id) rather than the string itself, to avoid repeating that string
+  once per record — a source file's records are otherwise identical strings
+  repeated thousands of times over. Look the string up via
+  `dataset.source_ids[source_id]`, then that string (`<dataset_id>/<file_name>`,
+  or `<dataset_id>/<file_name>#<hash>` if two different files happened to
+  share a `file_name` — see the manifest's collision handling) in
+  `data/manifest.jsonl` for the file's source URL, license, checksum, etc.
 - **`record_ref`** — an offset back into the *original raw file* (byte
   offset, array index, or Windows event record ID depending on the format)
   that can re-derive this exact record from source, independent of the
@@ -147,14 +152,15 @@ dataset.indices_for_source("otrf/ec2_proxy_s3_exfiltration/...json")  # all reco
 ```
 
 Each record's provenance is a separate `ShardIndexEntry` at the same index in
-`dataset.index` — `source_id` (cross-reference against `data/manifest.jsonl`)
-and `record_ref` (to re-derive the record from its original raw file):
+`dataset.index` — `source_id` (an int; resolve the string via
+`dataset.source_ids`, then cross-reference against `data/manifest.jsonl`) and
+`record_ref` (to re-derive the record from its original raw file):
 
 ```python
 from awesome_log_data.manifest import ManifestStore
 
 manifest = ManifestStore(Path("data/manifest.jsonl"))
-entry = manifest.get(dataset.index[0].source_id)
+entry = manifest.get(dataset.source_ids[dataset.index[0].source_id])
 entry.source_url, entry.license, entry.labeled
 ```
 
