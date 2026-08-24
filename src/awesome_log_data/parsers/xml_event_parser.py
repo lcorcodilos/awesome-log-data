@@ -16,7 +16,9 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from pathlib import Path
+from xml.parsers.expat import ExpatError
 
+import logfire
 import xmltodict
 
 from awesome_log_data.base import ParsedRecord, RecordRefType
@@ -30,8 +32,11 @@ class XmlEventParser:
     def parse(self, path: Path) -> Iterator[tuple[int, ParsedRecord]]:
         data = path.read_bytes()
         for match in _EVENT_RE.finditer(data):
-            record: ParsedRecord = xmltodict.parse(match.group(), attr_prefix="")
-            yield match.start(), record
+            try:
+                record: ParsedRecord = xmltodict.parse(match.group(), attr_prefix="")
+                yield match.start(), record
+            except ExpatError as e:
+                logfire.warn(f"Skipping record in {str(path)} with this error:\n{str(e)}")
 
     def resolve(self, path: Path, ref: int) -> ParsedRecord:
         data = path.read_bytes()

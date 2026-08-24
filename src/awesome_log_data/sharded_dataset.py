@@ -127,7 +127,7 @@ class ShardedDataset:
         self._write_source_ids()
 
     def _write_index(self) -> None:
-        pl.DataFrame(self._index).write_parquet(self._index_path())
+        pl.DataFrame(self._index).write_parquet(self._index_path(), mkdir=True)
 
     def _write_source_ids(self) -> None:
         with open(self._source_ids_path(), "w", encoding="utf-8") as f:
