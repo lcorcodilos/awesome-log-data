@@ -12,11 +12,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import click
+import logfire
 
 from awesome_log_data.adapters import adapter_exists, get_adapter
 from awesome_log_data.base import DatasetId
 from awesome_log_data.manifest import ManifestEntry, ManifestStore, compute_source_id, sha256_file
 from awesome_log_data.sharded_dataset import ShardedDataset
+
+logfire.configure(send_to_logfire=False)
 
 DEFAULT_MANIFEST_PATH = Path("data/manifest.jsonl")
 DEFAULT_PARSED_ROOT = Path("data/parsed")
@@ -27,6 +30,28 @@ class IngestSummary:
     files_ingested: int
     files_skipped: int
     records_written: int
+    records_dropped: int
+
+
+def _count_fields(value: object) -> int:
+    """Number of key-value pairs in a (possibly nested) parsed record.
+    Nested dict/list values contribute their own keys too, so a record
+    with few top-level keys but a nested payload still counts as rich."""
+    if isinstance(value, dict):
+        return len(value) + sum(_count_fields(v) for v in value.values())
+    if isinstance(value, list):
+        return sum(_count_fields(v) for v in value)
+    return 0
+
+
+def _passes_quality_filter(
+    parsed: object, *, skip_non_dict: bool, minimum_fields: int | None
+) -> bool:
+    if skip_non_dict and not isinstance(parsed, dict):
+        return False
+    if minimum_fields is not None and _count_fields(parsed) < minimum_fields:
+        return False
+    return True
 
 
 def ingest_dataset(
@@ -35,14 +60,18 @@ def ingest_dataset(
     *,
     manifest_path: Path = DEFAULT_MANIFEST_PATH,
     parsed_root: Path = DEFAULT_PARSED_ROOT,
+    skip_non_dict: bool = True,
+    minimum_fields: int | None = 4,
 ) -> IngestSummary:
     adapter = get_adapter(dataset_id)
     manifest = ManifestStore(manifest_path)
     dataset = ShardedDataset(parsed_root / dataset_id)
+    parsed_root.mkdir(parents=True, exist_ok=True)
 
     files_ingested = 0
     files_skipped = 0
     records_written = 0
+    records_dropped = 0
 
     try:
         for source in adapter.discover(raw_path):
@@ -56,6 +85,11 @@ def ingest_dataset(
 
             record_count = 0
             for ref, parsed in source.parser.parse(source.path):
+                if not _passes_quality_filter(
+                    parsed, skip_non_dict=skip_non_dict, minimum_fields=minimum_fields
+                ):
+                    records_dropped += 1
+                    continue
                 dataset.append(source_id, ref, parsed)
                 record_count += 1
 
@@ -85,13 +119,14 @@ def ingest_dataset(
         files_ingested=files_ingested,
         files_skipped=files_skipped,
         records_written=records_written,
+        records_dropped=records_dropped,
     )
 
 
 @click.command()
 @click.argument("dataset_id")
-@click.argument("path", type=click.Path(exists=True, path_type=Path))
-def main(dataset_id: str, path: Path) -> None:
+@click.argument("path", required=False, default=None, type=click.Path(exists=True, path_type=Path))
+def main(dataset_id: str, path: Path | None) -> None:
     """Ingest DATASET_ID's raw files at PATH: extract + parse + manifest + shard."""
     # Checking dataset ID here instead of click.Choice to keep it
     # live across the module's lifetime, same as the registry itself.
@@ -101,11 +136,14 @@ def main(dataset_id: str, path: Path) -> None:
             param_hint="'dataset_id'",
         )
 
+    if path is None:
+        path = Path(f"data/raw/{dataset_id}")
+
     summary = ingest_dataset(dataset_id, path)
     click.echo(
         f"{dataset_id}: ingested {summary.files_ingested} file(s) "
-        f"({summary.records_written} records), skipped {summary.files_skipped} "
-        "already-ingested file(s)"
+        f"({summary.records_written} records, {summary.records_dropped} dropped by "
+        f"quality filter), skipped {summary.files_skipped} already-ingested file(s)"
     )
 
 

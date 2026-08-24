@@ -61,11 +61,14 @@ def test_ingest_dataset_writes_manifest_and_shards(tmp_path: Path) -> None:
     manifest_path = tmp_path / "manifest.jsonl"
     parsed_root = tmp_path / "parsed"
 
-    summary = ingest_dataset(OTRF, raw, manifest_path=manifest_path, parsed_root=parsed_root)
+    summary = ingest_dataset(
+        OTRF, raw, manifest_path=manifest_path, parsed_root=parsed_root, minimum_fields=None
+    )
 
     assert summary.files_ingested == 1
     assert summary.files_skipped == 0
     assert summary.records_written == 2
+    assert summary.records_dropped == 0
 
     manifest = ManifestStore(manifest_path)
     entry = manifest.get("otrf/sample.jsonl")
@@ -101,8 +104,12 @@ def test_ingest_dataset_is_idempotent_on_rerun(tmp_path: Path) -> None:
     manifest_path = tmp_path / "manifest.jsonl"
     parsed_root = tmp_path / "parsed"
 
-    ingest_dataset(OTRF, raw, manifest_path=manifest_path, parsed_root=parsed_root)
-    second = ingest_dataset(OTRF, raw, manifest_path=manifest_path, parsed_root=parsed_root)
+    ingest_dataset(
+        OTRF, raw, manifest_path=manifest_path, parsed_root=parsed_root, minimum_fields=None
+    )
+    second = ingest_dataset(
+        OTRF, raw, manifest_path=manifest_path, parsed_root=parsed_root, minimum_fields=None
+    )
 
     assert second.files_ingested == 0
     assert second.files_skipped == 1
@@ -146,7 +153,9 @@ def test_ingest_dataset_interleaves_multiple_source_files(tmp_path: Path) -> Non
     manifest_path = tmp_path / "manifest.jsonl"
     parsed_root = tmp_path / "parsed"
 
-    ingest_dataset(OTRF, raw, manifest_path=manifest_path, parsed_root=parsed_root)
+    ingest_dataset(
+        OTRF, raw, manifest_path=manifest_path, parsed_root=parsed_root, minimum_fields=None
+    )
 
     manifest = ManifestStore(manifest_path)
     assert manifest.get("otrf/a.jsonl") is not None
@@ -158,6 +167,104 @@ def test_ingest_dataset_interleaves_multiple_source_files(tmp_path: Path) -> Non
         "otrf/a.jsonl",
         "otrf/b.jsonl",
     }
+
+
+def test_ingest_dataset_drops_non_dict_records_by_default(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    source_path = raw / "sample.jsonl"
+    _write_jsonl(source_path, [{"a": 1, "b": 2, "c": 3, "d": 4}])
+    with open(source_path, "a", encoding="utf-8") as f:
+        f.write("400\n")
+
+    source = SourceFile(
+        file_name="sample.jsonl",
+        path=source_path,
+        parser=JsonLinesParser(),
+        source_url="https://example.com/sample.jsonl",
+        license="MIT",
+        labeled=False,
+    )
+    adapters.register(_fake_adapter([source]))
+
+    manifest_path = tmp_path / "manifest.jsonl"
+    parsed_root = tmp_path / "parsed"
+
+    summary = ingest_dataset(OTRF, raw, manifest_path=manifest_path, parsed_root=parsed_root)
+
+    assert summary.records_written == 1
+    assert summary.records_dropped == 1
+
+    dataset = ShardedDataset(parsed_root / "otrf")
+    assert len(dataset) == 1
+
+
+def test_ingest_dataset_drops_records_below_minimum_fields(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    source_path = raw / "sample.jsonl"
+    _write_jsonl(
+        source_path,
+        [
+            {"eventName": "A"},
+            {"a": 1, "b": 2, "c": 3, "d": 4},
+            {"a": 1, "nested": {"b": 2, "c": 3, "d": 4}},
+        ],
+    )
+
+    source = SourceFile(
+        file_name="sample.jsonl",
+        path=source_path,
+        parser=JsonLinesParser(),
+        source_url="https://example.com/sample.jsonl",
+        license="MIT",
+        labeled=False,
+    )
+    adapters.register(_fake_adapter([source]))
+
+    manifest_path = tmp_path / "manifest.jsonl"
+    parsed_root = tmp_path / "parsed"
+
+    summary = ingest_dataset(OTRF, raw, manifest_path=manifest_path, parsed_root=parsed_root)
+
+    # The single top-level field is dropped; the flat 4-field record and the
+    # nested-to-4-fields record both survive, proving nested fields count.
+    assert summary.records_written == 2
+    assert summary.records_dropped == 1
+
+
+def test_ingest_dataset_quality_filter_can_be_disabled(tmp_path: Path) -> None:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    source_path = raw / "sample.jsonl"
+    _write_jsonl(source_path, [{"eventName": "A"}])
+    with open(source_path, "a", encoding="utf-8") as f:
+        f.write("400\n")
+
+    source = SourceFile(
+        file_name="sample.jsonl",
+        path=source_path,
+        parser=JsonLinesParser(),
+        source_url="https://example.com/sample.jsonl",
+        license="MIT",
+        labeled=False,
+    )
+    adapters.register(_fake_adapter([source]))
+
+    manifest_path = tmp_path / "manifest.jsonl"
+    parsed_root = tmp_path / "parsed"
+
+    summary = ingest_dataset(
+        OTRF,
+        raw,
+        manifest_path=manifest_path,
+        parsed_root=parsed_root,
+        skip_non_dict=False,
+        minimum_fields=None,
+    )
+
+    assert summary.records_written == 2
+    assert summary.records_dropped == 0
 
 
 def test_main_parses_argv_and_invokes_ingest_dataset(
@@ -173,7 +280,9 @@ def test_main_parses_argv_and_invokes_ingest_dataset(
 
     def _fake_ingest(dataset_id: DatasetId, raw_path: Path, **_: object) -> IngestSummary:
         calls.append((dataset_id, raw_path))
-        return IngestSummary(files_ingested=0, files_skipped=0, records_written=0)
+        return IngestSummary(
+            files_ingested=0, files_skipped=0, records_written=0, records_dropped=0
+        )
 
     monkeypatch.setattr("awesome_log_data.cli.ingest_dataset", _fake_ingest)
 
