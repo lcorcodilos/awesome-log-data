@@ -76,3 +76,39 @@ def test_parse_yields_nothing_for_a_file_with_no_events(tmp_path: Path) -> None:
     results = list(parser.parse(path))
 
     assert results == []
+
+
+def test_parse_escapes_unescaped_ampersands_in_field_text(tmp_path: Path) -> None:
+    # Some source exports don't XML-escape command lines, e.g. `2>&1` or
+    # `&($ShellId[1] + 'ex')`, which expat otherwise rejects outright.
+    data = (
+        b"<Event xmlns='urn:x'><System><EventID>1</EventID></System>"
+        b"<EventData><Data Name='CommandLine'>foo.exe 2>&1 &amp; bar</Data></EventData>"
+        b"</Event>\n"
+    )
+    path = tmp_path / "ampersand.log"
+    path.write_bytes(data)
+
+    parser = XmlEventParser()
+    results = list(parser.parse(path))
+
+    assert len(results) == 1
+    assert results[0][1]["Event"]["EventData"]["Data"]["#text"] == "foo.exe 2>&1 & bar"
+
+
+def test_parse_skips_truncated_event_without_corrupting_the_next_record(tmp_path: Path) -> None:
+    # A truncated record (no closing </Event>, e.g. cut off mid-attribute)
+    # must not swallow the following, well-formed record into one bad match.
+    data = (
+        b"<Event xmlns='urn:x'><System><EventID>1</EventID></System>"
+        b"<EventData><Data Name='CommandLine'>truncated mid-valu"
+        b"<Event xmlns='urn:x'><System><EventID>2</EventID></System></Event>\n"
+    )
+    path = tmp_path / "truncated.log"
+    path.write_bytes(data)
+
+    parser = XmlEventParser()
+    results = list(parser.parse(path))
+
+    assert len(results) == 1
+    assert results[0][1]["Event"]["System"]["EventID"] == "2"
