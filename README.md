@@ -36,11 +36,18 @@ the table above is a summary, not the source of truth.
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/)
 
-Install dependencies:
-
+Clone this repository and install dependencies if you want to create parsed datasets:
 ```sh
+git clone https://github.com/lcorcodilos/awesome-log-data.git
 uv sync
 ```
+
+Install as a project dependency if you want to use the `ShardedDataset` class for reading
+data into your project:
+```sh
+uv add awesome-log-data
+```
+
 
 ## Fetching raw data
 
@@ -146,9 +153,11 @@ from awesome_log_data.sharded_dataset import ShardedDataset
 
 dataset = ShardedDataset(Path("data/parsed/otrf"))
 
-len(dataset)             # total record count
-dataset[0]                # {"eventName": "GetObject", "...": "..."} - the bare parsed record
-dataset.indices_for_source("otrf/ec2_proxy_s3_exfiltration/...json")  # all record indices from one raw file
+len(dataset)  # total record count
+dataset[0]  # {"eventName": "GetObject", "...": "..."} - the bare parsed record
+dataset.indices_for_source(
+    "otrf/ec2_proxy_s3_exfiltration/...json"
+)  # all record indices from one raw file
 ```
 
 Each record's provenance is a separate `ShardIndexEntry` at the same index in
@@ -173,10 +182,7 @@ entry's `record_ref_type` and `dataset.index[0].record_ref`:
 from awesome_log_data.adapters import get_adapter
 
 adapter = get_adapter(entry.dataset_id)
-source = next(
-    s for s in adapter.discover(Path("data/raw/otrf"))
-    if s.file_name == entry.file_name
-)
+source = next(s for s in adapter.discover(Path("data/raw/otrf")) if s.file_name == entry.file_name)
 source.parser.resolve(source.path, dataset.index[0].record_ref)
 ```
 
